@@ -1,0 +1,1586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EcoSched — Energy-Aware CPU Scheduler</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #090c10;
+    --surface: #0d1117;
+    --surface2: #161b22;
+    --border: #21262d;
+    --accent: #39ff14;
+    --accent2: #00d4ff;
+    --accent3: #ff6b35;
+    --warn: #ffd700;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --red: #ff4757;
+    --purple: #a855f7;
+    --font-mono: 'Space Mono', monospace;
+    --font-head: 'Syne', sans-serif;
+    --glow: 0 0 20px rgba(57,255,20,0.3);
+    --glow2: 0 0 20px rgba(0,212,255,0.3);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(57,255,20,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(57,255,20,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* HEADER */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(9,12,16,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .logo {
+    font-family: var(--font-head);
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+
+  .logo span { color: var(--accent); }
+
+  .header-badge {
+    font-size: 10px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 20px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  /* MAIN LAYOUT */
+  .main {
+    position: relative;
+    z-index: 1;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px 16px;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 16px;
+  }
+
+  @media (max-width: 900px) {
+    .main { grid-template-columns: 1fr; }
+  }
+
+  /* PANELS */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-head);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .panel-header .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: var(--glow);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  .panel-body { padding: 16px; }
+
+  /* FORM ELEMENTS */
+  label {
+    display: block;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 5px;
+  }
+
+  input, select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 8px 10px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  input:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(57,255,20,0.1);
+  }
+
+  .form-row { margin-bottom: 12px; }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  /* BUTTONS */
+  .btn {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 9px 16px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+    width: 100%;
+  }
+
+  .btn-primary:hover { box-shadow: var(--glow); transform: translateY(-1px); }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    width: 100%;
+    margin-top: 6px;
+  }
+
+  .btn-secondary:hover { background: rgba(57,255,20,0.08); }
+
+  .btn-danger {
+    background: transparent;
+    color: var(--red);
+    border: 1px solid var(--red);
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+
+  .btn-danger:hover { background: rgba(255,71,87,0.1); }
+
+  .btn-run {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #000;
+    font-family: var(--font-head);
+    font-size: 14px;
+    font-weight: 800;
+    width: 100%;
+    padding: 12px;
+    margin-top: 8px;
+    letter-spacing: 1px;
+  }
+
+  .btn-run:hover {
+    box-shadow: 0 0 30px rgba(57,255,20,0.4);
+    transform: translateY(-1px);
+  }
+
+  /* PROCESS TABLE */
+  .process-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    margin-top: 8px;
+  }
+
+  .process-table th {
+    text-align: left;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 400;
+  }
+
+  .process-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(33,38,45,0.5);
+  }
+
+  .process-table tr:last-child td { border-bottom: none; }
+
+  .proc-dot {
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    display: inline-block;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  /* ALGORITHM SELECTOR */
+  .algo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .algo-btn {
+    padding: 8px 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .algo-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .algo-btn.active {
+    background: rgba(57,255,20,0.08);
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: inset 0 0 10px rgba(57,255,20,0.05);
+  }
+
+  /* QUANTUM ROW */
+  #quantum-row { display: none; }
+  #priority-mode-row { display: none; }
+
+  /* RIGHT PANEL TABS */
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .tab {
+    padding: 10px 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .tab-content { display: none; padding: 16px; }
+  .tab-content.active { display: block; }
+
+  /* GANTT CHART */
+  .gantt-wrap {
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+
+  #gantt-svg {
+    min-width: 600px;
+    width: 100%;
+    height: auto;
+  }
+
+  .gantt-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    fill: var(--muted);
+  }
+
+  .gantt-proc-label {
+    font-family: var(--font-head);
+    font-size: 11px;
+    font-weight: 700;
+    fill: #000;
+    dominant-baseline: central;
+    text-anchor: middle;
+  }
+
+  /* METRICS GRID */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .metric-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .metric-value {
+    font-family: var(--font-head);
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .metric-label {
+    font-size: 9px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+
+  /* RESULTS TABLE */
+  .results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .results-table th {
+    text-align: left;
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 400;
+  }
+
+  .results-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(33,38,45,0.5);
+    font-family: var(--font-mono);
+  }
+
+  .results-table tr:last-child td { border-bottom: none; }
+
+  .results-table .num { color: var(--accent2); font-weight: 700; }
+
+  /* ENERGY BAR */
+  .energy-bar-wrap { margin-bottom: 6px; }
+
+  .energy-bar-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    margin-bottom: 3px;
+  }
+
+  .energy-bar-track {
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .energy-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.8s cubic-bezier(0.16,1,0.3,1);
+  }
+
+  /* COMPARISON TABLE */
+  .cmp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+
+  .cmp-table th {
+    padding: 8px 10px;
+    text-align: center;
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    font-weight: 400;
+  }
+
+  .cmp-table th:first-child { text-align: left; }
+
+  .cmp-table td {
+    padding: 7px 10px;
+    text-align: center;
+    border-bottom: 1px solid rgba(33,38,45,0.4);
+  }
+
+  .cmp-table td:first-child { text-align: left; color: var(--text); font-weight: 700; }
+  .cmp-table tr:last-child td { border-bottom: none; }
+
+  .cmp-best { color: var(--accent); }
+  .cmp-worst { color: var(--red); }
+
+  /* CHART CONTAINER */
+  .chart-container {
+    position: relative;
+    height: 220px;
+    margin-bottom: 16px;
+  }
+
+  /* ENERGY BADGE */
+  .energy-rating {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(57,255,20,0.08);
+    border: 1px solid rgba(57,255,20,0.3);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 11px;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+
+  .energy-rating .lightning { font-size: 14px; }
+
+  /* EMPTY STATE */
+  .empty-state {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--muted);
+  }
+
+  .empty-state .icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+  .empty-state p { font-size: 12px; line-height: 1.6; }
+
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--surface); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* TOOLTIP */
+  .tooltip-wrap { position: relative; display: inline-block; }
+  .tooltip-content {
+    visibility: hidden;
+    position: absolute;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 10px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    white-space: nowrap;
+    z-index: 200;
+    pointer-events: none;
+  }
+  .tooltip-wrap:hover .tooltip-content { visibility: visible; }
+
+  /* TAGS */
+  .tag {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+
+  .tag-green { background: rgba(57,255,20,0.1); color: var(--accent); border: 1px solid rgba(57,255,20,0.3); }
+  .tag-blue { background: rgba(0,212,255,0.1); color: var(--accent2); border: 1px solid rgba(0,212,255,0.3); }
+  .tag-orange { background: rgba(255,107,53,0.1); color: var(--accent3); border: 1px solid rgba(255,107,53,0.3); }
+  .tag-red { background: rgba(255,71,87,0.1); color: var(--red); border: 1px solid rgba(255,71,87,0.3); }
+
+  /* ALGO INFO */
+  .algo-info {
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.6;
+    padding: 8px;
+    background: rgba(255,255,255,0.02);
+    border-radius: 4px;
+    border-left: 2px solid var(--accent);
+    margin-top: 6px;
+    margin-bottom: 10px;
+  }
+
+  /* DIVIDER */
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 14px 0;
+  }
+
+  .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  /* RESPONSIVE TABS */
+  .tabs-wrap { overflow-x: auto; }
+  .tabs { min-width: max-content; }
+
+  /* FOOTER */
+  footer {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 20px;
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 1px;
+    border-top: 1px solid var(--border);
+    margin-top: 16px;
+  }
+
+  /* ANIMATIONS */
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .anim-in { animation: fadeInUp 0.4s ease forwards; }
+
+  /* GANTT HOVER */
+  .gantt-block { cursor: pointer; transition: filter 0.15s; }
+  .gantt-block:hover { filter: brightness(1.2); }
+
+  /* STATUS BAR */
+  .status-bar {
+    display: flex;
+    gap: 16px;
+    font-size: 10px;
+    color: var(--muted);
+    padding: 6px 16px;
+    background: var(--surface2);
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+  .status-item { display: flex; align-items: center; gap: 5px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* RANGE INPUT */
+  input[type=range] {
+    padding: 0;
+    height: 4px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  /* NO PROCESS */
+  .no-proc {
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    padding: 16px;
+  }
+
+  /* MLQ/MLFQ queues display */
+  .queue-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    border: 1px solid var(--border);
+    margin: 2px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Eco<span>Sched</span></div>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span style="font-size:10px;color:var(--accent)">⚡ ENERGY-AWARE</span>
+    <span class="header-badge">CPU SCHEDULER v2.0</span>
+  </div>
+</header>
+
+<div class="main">
+  <!-- LEFT SIDEBAR -->
+  <div style="display:flex;flex-direction:column;gap:14px;">
+
+    <!-- ALGORITHM PANEL -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="dot"></div>
+        Algorithm
+      </div>
+      <div class="panel-body">
+        <div class="section-label">Select Scheduling Policy</div>
+        <div class="algo-grid">
+          <button class="algo-btn active" onclick="selectAlgo('FCFS')">FCFS</button>
+          <button class="algo-btn" onclick="selectAlgo('SJF')">SJF</button>
+          <button class="algo-btn" onclick="selectAlgo('SRTF')">SRTF</button>
+          <button class="algo-btn" onclick="selectAlgo('RR')">Round Robin</button>
+          <button class="algo-btn" onclick="selectAlgo('PRIORITY_NP')">Priority NP</button>
+          <button class="algo-btn" onclick="selectAlgo('PRIORITY_P')">Priority P</button>
+          <button class="algo-btn" onclick="selectAlgo('MLQ')">MLQ</button>
+          <button class="algo-btn" onclick="selectAlgo('MLFQ')">MLFQ</button>
+        </div>
+        <div id="algo-info-box" class="algo-info">First Come First Serve — processes are scheduled in arrival order. Simple, no starvation but poor average wait times.</div>
+        <div class="form-row" id="quantum-row">
+          <label>Time Quantum (ms)</label>
+          <input type="number" id="quantum" value="2" min="1" max="20">
+        </div>
+        <div class="form-row" id="priority-mode-row">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Priority Mode: Lower number = Higher priority</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADD PROCESS PANEL -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="dot" style="background:var(--accent2);box-shadow:var(--glow2)"></div>
+        Add Process
+      </div>
+      <div class="panel-body">
+        <div class="form-grid">
+          <div>
+            <label>Arrival (ms)</label>
+            <input type="number" id="inp-at" value="0" min="0">
+          </div>
+          <div>
+            <label>Burst (ms)</label>
+            <input type="number" id="inp-bt" value="5" min="1">
+          </div>
+          <div>
+            <label>Priority</label>
+            <input type="number" id="inp-pr" value="1" min="1" max="10">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="addProcess()">+ Add Process</button>
+        <button class="btn btn-secondary" onclick="loadSample()">Load Sample</button>
+        <div class="divider"></div>
+        <div class="section-label">Process Queue</div>
+        <div id="proc-list">
+          <div class="no-proc">No processes added yet</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RUN BUTTON -->
+    <div class="panel">
+      <div class="panel-body">
+        <button class="btn btn-run" onclick="runSimulation()">▶ RUN SIMULATION</button>
+        <button class="btn btn-secondary" onclick="runAllAndCompare()" style="margin-top:8px">⚖ COMPARE ALL ALGORITHMS</button>
+        <button class="btn btn-secondary" onclick="clearAll()" style="margin-top:6px;color:var(--red);border-color:var(--red)">✕ CLEAR ALL</button>
+      </div>
+    </div>
+
+    <!-- ENERGY MODEL INFO -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="dot" style="background:var(--warn);box-shadow:0 0 10px rgba(255,215,0,0.4)"></div>
+        Energy Model
+      </div>
+      <div class="panel-body" style="font-size:10px;color:var(--muted);line-height:1.8">
+        <div style="margin-bottom:6px"><span style="color:var(--accent)">●</span> Active CPU: <span style="color:var(--text)">1.0 unit/ms</span></div>
+        <div style="margin-bottom:6px"><span style="color:var(--accent2)">●</span> Idle CPU: <span style="color:var(--text)">0.2 unit/ms</span></div>
+        <div style="margin-bottom:6px"><span style="color:var(--accent3)">●</span> Context Switch: <span style="color:var(--text)">0.5 unit/switch</span></div>
+        <div style="margin-bottom:6px"><span style="color:var(--red)">●</span> Preemption: <span style="color:var(--text)">0.3 unit/preempt</span></div>
+        <div class="divider" style="margin:8px 0"></div>
+        <div style="font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Energy Score = Active + Idle×0.2 + CS×0.5 + Preempt×0.3</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT CONTENT -->
+  <div style="display:flex;flex-direction:column;gap:14px;">
+
+    <!-- RESULTS PANEL -->
+    <div class="panel">
+      <div class="tabs-wrap">
+        <div class="tabs">
+          <div class="tab active" onclick="switchTab('gantt')">📊 Gantt Chart</div>
+          <div class="tab" onclick="switchTab('metrics')">📈 Metrics</div>
+          <div class="tab" onclick="switchTab('energy')">⚡ Energy</div>
+          <div class="tab" onclick="switchTab('compare')">⚖ Compare</div>
+          <div class="tab" onclick="switchTab('charts')">📉 Graphs</div>
+        </div>
+      </div>
+
+      <!-- GANTT TAB -->
+      <div id="tab-gantt" class="tab-content active">
+        <div id="gantt-area">
+          <div class="empty-state">
+            <div class="icon">🖥</div>
+            <p>Add processes and run the simulation<br>to visualize the Gantt chart here.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- METRICS TAB -->
+      <div id="tab-metrics" class="tab-content">
+        <div id="metrics-area">
+          <div class="empty-state">
+            <div class="icon">📊</div>
+            <p>Run simulation to see performance metrics.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ENERGY TAB -->
+      <div id="tab-energy" class="tab-content">
+        <div id="energy-area">
+          <div class="empty-state">
+            <div class="icon">⚡</div>
+            <p>Run simulation to see energy analysis.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- COMPARE TAB -->
+      <div id="tab-compare" class="tab-content">
+        <div id="compare-area">
+          <div class="empty-state">
+            <div class="icon">⚖</div>
+            <p>Click "Compare All Algorithms" to see a<br>side-by-side comparison dashboard.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- CHARTS TAB -->
+      <div id="tab-charts" class="tab-content">
+        <div id="charts-area">
+          <div class="empty-state">
+            <div class="icon">📉</div>
+            <p>Run simulation or compare to generate charts.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- STATUS BAR -->
+      <div class="status-bar" id="status-bar">
+        <div class="status-item"><div class="status-dot" style="background:var(--accent)"></div>READY</div>
+        <div class="status-item">ALGO: <span id="st-algo" style="color:var(--text)">FCFS</span></div>
+        <div class="status-item">PROCS: <span id="st-procs" style="color:var(--text)">0</span></div>
+        <div class="status-item">TIME UNITS: <span id="st-time" style="color:var(--text)">—</span></div>
+        <div class="status-item">ENERGY: <span id="st-energy" style="color:var(--accent)">—</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>ECOSCHED — ENERGY-AWARE CPU SCHEDULING SIMULATOR &nbsp;|&nbsp; MOBILE & EMBEDDED SYSTEMS FOCUS</footer>
+
+<script>
+// ============================================================
+// GLOBALS
+// ============================================================
+const COLORS = [
+  '#39ff14','#00d4ff','#ff6b35','#a855f7','#ffd700',
+  '#ff4757','#2ed573','#1e90ff','#ff6348','#eccc68',
+  '#70a1ff','#ff6b81','#7bed9f','#5352ed','#ff4500'
+];
+
+let processes = [];
+let pidCounter = 1;
+let currentAlgo = 'FCFS';
+let lastResult = null;
+let compareResults = null;
+let charts = {};
+
+const ALGO_INFO = {
+  FCFS: 'First Come First Serve — processes scheduled in arrival order. Simple, no starvation. Poor average wait for heavy loads.',
+  SJF: 'Shortest Job First (Non-Preemptive) — picks shortest burst among available. Optimal avg WT but needs burst prediction.',
+  SRTF: 'Shortest Remaining Time First — preemptive SJF. Best avg WT but high context switches, higher energy cost.',
+  RR: 'Round Robin — each process gets fixed time quantum. Fair, good responsiveness. Energy depends on quantum size.',
+  PRIORITY_NP: 'Priority Scheduling (Non-Preemptive) — highest priority runs to completion. Risk of starvation for low-priority.',
+  PRIORITY_P: 'Priority Scheduling (Preemptive) — higher priority can preempt current. More responsive, higher context switch cost.',
+  MLQ: 'Multilevel Queue — processes in fixed queues (High/Med/Low priority). High queue uses RR, lower use FCFS.',
+  MLFQ: 'Multilevel Feedback Queue — processes demoted on long usage, promoted on I/O. Adaptive, best overall efficiency.'
+};
+
+// ============================================================
+// PROCESS MANAGEMENT
+// ============================================================
+function addProcess() {
+  const at = parseInt(document.getElementById('inp-at').value) || 0;
+  const bt = parseInt(document.getElementById('inp-bt').value) || 1;
+  const pr = parseInt(document.getElementById('inp-pr').value) || 1;
+  if (bt < 1) { alert('Burst time must be ≥ 1'); return; }
+  processes.push({
+    id: pidCounter,
+    name: 'P' + pidCounter,
+    at, bt, pr,
+    color: COLORS[(pidCounter - 1) % COLORS.length]
+  });
+  pidCounter++;
+  renderProcList();
+  updateStatus();
+  // auto-increment arrival for convenience
+  document.getElementById('inp-at').value = at;
+}
+
+function removeProcess(id) {
+  processes = processes.filter(p => p.id !== id);
+  renderProcList();
+  updateStatus();
+}
+
+function loadSample() {
+  processes = [];
+  pidCounter = 1;
+  const samples = [
+    {at:0,bt:8,pr:3},{at:1,bt:4,pr:1},{at:2,bt:9,pr:2},
+    {at:3,bt:5,pr:4},{at:4,bt:2,pr:2},{at:6,bt:6,pr:3}
+  ];
+  samples.forEach(s => {
+    processes.push({
+      id: pidCounter, name: 'P'+pidCounter,
+      at: s.at, bt: s.bt, pr: s.pr,
+      color: COLORS[(pidCounter-1) % COLORS.length]
+    });
+    pidCounter++;
+  });
+  renderProcList();
+  updateStatus();
+}
+
+function clearAll() {
+  processes = [];
+  pidCounter = 1;
+  lastResult = null;
+  compareResults = null;
+  renderProcList();
+  updateStatus();
+  document.getElementById('gantt-area').innerHTML = `<div class="empty-state"><div class="icon">🖥</div><p>Add processes and run the simulation<br>to visualize the Gantt chart here.</p></div>`;
+  document.getElementById('metrics-area').innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>Run simulation to see performance metrics.</p></div>`;
+  document.getElementById('energy-area').innerHTML = `<div class="empty-state"><div class="icon">⚡</div><p>Run simulation to see energy analysis.</p></div>`;
+  document.getElementById('compare-area').innerHTML = `<div class="empty-state"><div class="icon">⚖</div><p>Click "Compare All Algorithms" to see comparison.</p></div>`;
+  document.getElementById('charts-area').innerHTML = `<div class="empty-state"><div class="icon">📉</div><p>Run simulation or compare to generate charts.</p></div>`;
+  destroyCharts();
+}
+
+function renderProcList() {
+  const el = document.getElementById('proc-list');
+  if (processes.length === 0) { el.innerHTML = '<div class="no-proc">No processes added yet</div>'; return; }
+  let html = `<table class="process-table">
+    <thead><tr><th>Proc</th><th>AT</th><th>BT</th><th>Pri</th><th></th></tr></thead><tbody>`;
+  processes.forEach(p => {
+    html += `<tr>
+      <td><span class="proc-dot" style="background:${p.color}"></span>${p.name}</td>
+      <td>${p.at}</td><td>${p.bt}</td><td>${p.pr}</td>
+      <td><button class="btn btn-danger" onclick="removeProcess(${p.id})">✕</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function updateStatus() {
+  document.getElementById('st-procs').textContent = processes.length;
+  document.getElementById('st-algo').textContent = currentAlgo;
+}
+
+function selectAlgo(algo) {
+  currentAlgo = algo;
+  document.querySelectorAll('.algo-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('algo-info-box').textContent = ALGO_INFO[algo];
+  document.getElementById('quantum-row').style.display = algo === 'RR' ? 'block' : 'none';
+  document.getElementById('priority-mode-row').style.display = (algo === 'PRIORITY_NP' || algo === 'PRIORITY_P') ? 'block' : 'none';
+  updateStatus();
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// ============================================================
+// SCHEDULING ALGORITHMS
+// ============================================================
+function cloneProcs() {
+  return processes.map(p => ({...p, rem: p.bt, finished: false, ct: 0, tat: 0, wt: 0, startTime: -1}));
+}
+
+function schedFCFS(procs) {
+  const ps = [...procs].sort((a,b) => a.at - b.at || a.id - b.id);
+  let timeline = [], t = 0, cs = 0;
+  ps.forEach(p => {
+    if (t < p.at) { timeline.push({pid:-1, start:t, end:p.at}); t = p.at; }
+    timeline.push({pid:p.id, name:p.name, color:p.color, start:t, end:t+p.bt});
+    if (timeline.length > 1 && timeline[timeline.length-2].pid !== -1) cs++;
+    t += p.bt; p.ct = t; p.tat = p.ct - p.at; p.wt = p.tat - p.bt;
+  });
+  return {timeline, ps, cs, preemptions:0};
+}
+
+function schedSJF(procs) {
+  const ps = procs.map(p=>({...p})).sort((a,b)=>a.at-b.at);
+  let timeline=[], t=0, done=0, cs=0, remaining=[...ps];
+  while (done < ps.length) {
+    const avail = remaining.filter(p=>!p.finished && p.at<=t);
+    if (!avail.length) { 
+      const nxt = remaining.filter(p=>!p.finished).sort((a,b)=>a.at-b.at)[0];
+      timeline.push({pid:-1,start:t,end:nxt.at}); t=nxt.at; continue;
+    }
+    avail.sort((a,b)=>a.bt-b.bt||a.at-b.at);
+    const p = avail[0];
+    if (timeline.length && timeline[timeline.length-1].pid !== -1) cs++;
+    timeline.push({pid:p.id,name:p.name,color:p.color,start:t,end:t+p.bt});
+    t+=p.bt; p.ct=t; p.tat=p.ct-p.at; p.wt=p.tat-p.bt; p.finished=true; done++;
+  }
+  return {timeline, ps, cs, preemptions:0};
+}
+
+function schedSRTF(procs) {
+  const ps = procs.map(p=>({...p,rem:p.bt}));
+  let timeline=[], t=0, done=0, cs=0, preemptions=0, last=-1;
+  const maxT = procs.reduce((s,p)=>s+p.bt,0) + Math.max(...procs.map(p=>p.at)) + 10;
+  while (done < ps.length && t < maxT) {
+    const avail = ps.filter(p=>!p.finished && p.at<=t);
+    if (!avail.length) { t++; continue; }
+    avail.sort((a,b)=>a.rem-b.rem||a.at-b.at);
+    const p = avail[0];
+    if (last !== -1 && last !== p.id) { preemptions++; if(last !== -1) cs++; }
+    if (!timeline.length || timeline[timeline.length-1].pid !== p.id) {
+      timeline.push({pid:p.id,name:p.name,color:p.color,start:t,end:t+1});
+    } else { timeline[timeline.length-1].end++; }
+    p.rem--; last = p.id; t++;
+    if (p.rem === 0) { p.finished=true; p.ct=t; p.tat=p.ct-p.at; p.wt=p.tat-p.bt; done++; last=-1; }
+  }
+  return {timeline, ps, cs, preemptions};
+}
+
+function schedRR(procs, quantum) {
+  const ps = procs.map(p=>({...p,rem:p.bt}));
+  let timeline=[], t=0, cs=0, preemptions=0;
+  let queue=[], visited=new Set();
+  const sorted=[...ps].sort((a,b)=>a.at-b.at);
+  let idx=0;
+  if (sorted[0]) { queue.push(sorted[0]); visited.add(sorted[0].id); idx=1; }
+  while (queue.length || idx < sorted.length) {
+    if (!queue.length) {
+      while (idx < sorted.length && !visited.has(sorted[idx].id)) {
+        queue.push(sorted[idx]); visited.add(sorted[idx].id); idx++;
+        break;
+      }
+      if (!queue.length) break;
+    }
+    const p = queue.shift();
+    if (t < p.at) t = p.at;
+    if (timeline.length && timeline[timeline.length-1].pid !== p.id) { cs++; }
+    const exec = Math.min(p.rem, quantum);
+    timeline.push({pid:p.id,name:p.name,color:p.color,start:t,end:t+exec});
+    t += exec; p.rem -= exec;
+    // enqueue newly arrived
+    while (idx < sorted.length && sorted[idx].at <= t) {
+      if (!visited.has(sorted[idx].id)) { queue.push(sorted[idx]); visited.add(sorted[idx].id); }
+      idx++;
+    }
+    if (p.rem > 0) { queue.push(p); preemptions++; }
+    else { p.ct=t; p.tat=p.ct-p.at; p.wt=p.tat-p.bt; }
+  }
+  return {timeline, ps, cs, preemptions};
+}
+
+function schedPriorityNP(procs) {
+  const ps = procs.map(p=>({...p}));
+  let timeline=[], t=0, done=0, cs=0, remaining=[...ps];
+  while (done < ps.length) {
+    const avail = remaining.filter(p=>!p.finished && p.at<=t);
+    if (!avail.length) {
+      const nxt = remaining.filter(p=>!p.finished).sort((a,b)=>a.at-b.at)[0];
+      timeline.push({pid:-1,start:t,end:nxt.at}); t=nxt.at; continue;
+    }
+    avail.sort((a,b)=>a.pr-b.pr||a.at-b.at);
+    const p = avail[0];
+    if (timeline.length && timeline[timeline.length-1].pid !== -1) cs++;
+    timeline.push({pid:p.id,name:p.name,color:p.color,start:t,end:t+p.bt});
+    t+=p.bt; p.ct=t; p.tat=p.ct-p.at; p.wt=p.tat-p.bt; p.finished=true; done++;
+  }
+  return {timeline, ps, cs, preemptions:0};
+}
+
+function schedPriorityP(procs) {
+  const ps = procs.map(p=>({...p,rem:p.bt}));
+  let timeline=[], t=0, done=0, cs=0, preemptions=0, last=-1;
+  const maxT = procs.reduce((s,p)=>s+p.bt,0)+Math.max(...procs.map(p=>p.at))+10;
+  while (done < ps.length && t < maxT) {
+    const avail = ps.filter(p=>!p.finished && p.at<=t);
+    if (!avail.length) { t++; continue; }
+    avail.sort((a,b)=>a.pr-b.pr||a.at-b.at);
+    const p = avail[0];
+    if (last !== -1 && last !== p.id) { preemptions++; cs++; }
+    if (!timeline.length || timeline[timeline.length-1].pid !== p.id) {
+      timeline.push({pid:p.id,name:p.name,color:p.color,start:t,end:t+1});
+    } else { timeline[timeline.length-1].end++; }
+    p.rem--; last=p.id; t++;
+    if (p.rem===0) { p.finished=true; p.ct=t; p.tat=p.ct-p.at; p.wt=p.tat-p.bt; done++; last=-1; }
+  }
+  return {timeline, ps, cs, preemptions};
+}
+
+function schedMLQ(procs) {
+  // Priority 1-3: High (RR q=2), 4-6: Medium (RR q=4), 7+: Low (FCFS)
+  const high = procs.filter(p=>p.pr<=3);
+  const med = procs.filter(p=>p.pr>=4&&p.pr<=6);
+  const low = procs.filter(p=>p.pr>=7);
+  let allTimeline=[], allPs=[...procs.map(p=>({...p,rem:p.bt}))], cs=0, preemptions=0;
+  // Simulate: high queue runs first, then medium, then low
+  function runRRQueue(queue, q, tOffset) {
+    if (!queue.length) return {timeline:[], endT:tOffset};
+    const res = schedRR(queue.map(p=>({...p,at:Math.max(p.at,tOffset)})), q);
+    return {timeline: res.timeline.map(e=>({...e,start:e.start,end:e.end})), endT:res.timeline.reduce((m,e)=>Math.max(m,e.end),tOffset), ps:res.ps, cs:res.cs, preemptions:res.preemptions};
+  }
+  let t = 0;
+  if (high.length) {
+    const r = runRRQueue(high, 2, t); allTimeline.push(...r.timeline); cs+=r.cs||0; preemptions+=r.preemptions||0;
+    t = r.endT;
+    // update CT/TAT/WT for high procs
+    (r.ps||high).forEach(rp=>{
+      const orig = allPs.find(p=>p.id===rp.id);
+      if(orig){orig.ct=rp.ct;orig.tat=rp.tat;orig.wt=rp.wt;}
+    });
+  }
+  if (med.length) {
+    const r = runRRQueue(med, 4, t); allTimeline.push(...r.timeline); cs+=r.cs||0; preemptions+=r.preemptions||0;
+    t = r.endT;
+    (r.ps||med).forEach(rp=>{
+      const orig = allPs.find(p=>p.id===rp.id);
+      if(orig){orig.ct=rp.ct;orig.tat=rp.tat;orig.wt=rp.wt;}
+    });
+  }
+  if (low.length) {
+    const r = schedFCFS(low.map(p=>({...p,at:Math.max(p.at,t)})));
+    allTimeline.push(...r.timeline); cs+=r.cs;
+    r.ps.forEach(rp=>{
+      const orig = allPs.find(p=>p.id===rp.id);
+      if(orig){orig.ct=rp.ct;orig.tat=rp.tat;orig.wt=rp.wt;}
+    });
+  }
+  return {timeline:allTimeline, ps:allPs, cs, preemptions};
+}
+
+function schedMLFQ(procs) {
+  // 3 queues: Q0 (RR q=2), Q1 (RR q=4), Q2 (FCFS)
+  const ps = procs.map(p=>({...p,rem:p.bt,queue:0}));
+  let timeline=[], t=0, done=0, cs=0, preemptions=0;
+  const maxT = procs.reduce((s,p)=>s+p.bt,0)+Math.max(...procs.map(p=>p.at))+50;
+  let q0=[],q1=[],q2=[];
+  const sorted=[...ps].sort((a,b)=>a.at-b.at);
+  let arrIdx=0;
+  function enqueueArrivals() {
+    while(arrIdx<sorted.length && sorted[arrIdx].at<=t) {
+      q0.push(ps.find(p=>p.id===sorted[arrIdx].id));
+      arrIdx++;
+    }
+  }
+  enqueueArrivals();
+  while (done<ps.length && t<maxT) {
+    enqueueArrivals();
+    let p=null, quantum=0, curQ=0;
+    if (q0.length) { p=q0.shift(); quantum=2; curQ=0; }
+    else if (q1.length) { p=q1.shift(); quantum=4; curQ=1; }
+    else if (q2.length) { p=q2.shift(); quantum=Infinity; curQ=2; }
+    else { t++; enqueueArrivals(); continue; }
+    if (timeline.length && timeline[timeline.length-1].pid!==p.id) cs++;
+    const exec=Math.min(p.rem,quantum);
+    timeline.push({pid:p.id,name:p.name,color:p.color,start:t,end:t+exec});
+    t+=exec; p.rem-=exec;
+    enqueueArrivals();
+    if (p.rem===0) { p.ct=t; p.tat=p.ct-p.at; p.wt=p.tat-p.bt; p.finished=true; done++; }
+    else {
+      preemptions++;
+      if(curQ===0) q1.push(p);
+      else if(curQ===1) q2.push(p);
+      else q2.push(p);
+    }
+  }
+  return {timeline, ps, cs, preemptions};
+}
+
+// ============================================================
+// ENERGY MODEL
+// ============================================================
+function computeEnergy(result) {
+  const {timeline, ps, cs, preemptions} = result;
+  let active=0, idle=0;
+  timeline.forEach(e=>{
+    const dur = e.end - e.start;
+    if (e.pid===-1) idle+=dur; else active+=dur;
+  });
+  const energy = active*1.0 + idle*0.2 + cs*0.5 + preemptions*0.3;
+  const totalTime = timeline.length ? timeline[timeline.length-1].end : 0;
+  const cpuUtil = totalTime ? (active/totalTime*100).toFixed(1) : 0;
+  const avgTAT = ps.length ? (ps.reduce((s,p)=>s+(p.tat||0),0)/ps.length).toFixed(2) : 0;
+  const avgWT = ps.length ? (ps.reduce((s,p)=>s+(p.wt||0),0)/ps.length).toFixed(2) : 0;
+  return {energy:energy.toFixed(2), active, idle, cs, preemptions, cpuUtil, avgTAT, avgWT, totalTime};
+}
+
+// ============================================================
+// RUN SIMULATION
+// ============================================================
+function runSimulation() {
+  if (!processes.length) { alert('Add at least one process!'); return; }
+  const quantum = parseInt(document.getElementById('quantum').value) || 2;
+  const result = runAlgo(currentAlgo, processes, quantum);
+  lastResult = result;
+  const energy = computeEnergy(result);
+  renderGantt(result.timeline, result.ps);
+  renderMetrics(result.ps, energy, currentAlgo);
+  renderEnergy(energy, currentAlgo);
+  renderSingleCharts(result, energy);
+  document.getElementById('st-time').textContent = energy.totalTime + ' ms';
+  document.getElementById('st-energy').textContent = energy.energy + ' units';
+}
+
+function runAlgo(algo, procs, quantum=2) {
+  const p = cloneProcs.call({processes:procs}) || procs.map(p=>({...p,rem:p.bt,finished:false,ct:0,tat:0,wt:0}));
+  switch(algo) {
+    case 'FCFS': return schedFCFS(p);
+    case 'SJF': return schedSJF(p);
+    case 'SRTF': return schedSRTF(p);
+    case 'RR': return schedRR(p, quantum);
+    case 'PRIORITY_NP': return schedPriorityNP(p);
+    case 'PRIORITY_P': return schedPriorityP(p);
+    case 'MLQ': return schedMLQ(p);
+    case 'MLFQ': return schedMLFQ(p);
+    default: return schedFCFS(p);
+  }
+}
+
+function cloneProcs() {
+  return this.processes.map(p=>({...p,rem:p.bt,finished:false,ct:0,tat:0,wt:0,startTime:-1}));
+}
+
+// ============================================================
+// GANTT CHART RENDERING
+// ============================================================
+function renderGantt(timeline, ps) {
+  if (!timeline.length) return;
+  const el = document.getElementById('gantt-area');
+  const totalT = timeline[timeline.length-1].end;
+  const W = Math.max(600, totalT * 28 + 60);
+  const H = 160;
+  const barH = 50, barY = 40, labelY = barY + barH + 18;
+  let bars = '', labels = '', ticks = '';
+
+  // Collect unique time points
+  const timePoints = [...new Set(timeline.flatMap(e=>[e.start,e.end]))].sort((a,b)=>a-b);
+  const scaleX = (t) => 40 + (t / totalT) * (W - 60);
+
+  // bars
+  timeline.forEach(e => {
+    const x = scaleX(e.start), w = scaleX(e.end) - scaleX(e.start);
+    if (e.pid === -1) {
+      bars += `<rect x="${x}" y="${barY}" width="${w}" height="${barH}" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.08)" stroke-width="1" rx="2"/>`;
+      bars += `<text x="${x+w/2}" y="${barY+barH/2}" text-anchor="middle" dominant-baseline="central" font-family="Space Mono" font-size="10" fill="#4d5562">IDLE</text>`;
+    } else {
+      bars += `<rect class="gantt-block" x="${x}" y="${barY}" width="${w}" height="${barH}" fill="${e.color}" opacity="0.9" rx="3" stroke="rgba(0,0,0,0.3)" stroke-width="1">
+        <title>${e.name}: t=${e.start}→${e.end} (${e.end-e.start}ms)</title></rect>`;
+      if (w > 20) bars += `<text x="${x+w/2}" y="${barY+barH/2}" text-anchor="middle" dominant-baseline="central" font-family="Syne" font-size="11" font-weight="700" fill="#000">${e.name}</text>`;
+    }
+  });
+
+  // tick marks & labels
+  timePoints.forEach(t => {
+    const x = scaleX(t);
+    ticks += `<line x1="${x}" y1="${barY+barH}" x2="${x}" y2="${barY+barH+8}" stroke="var(--border)" stroke-width="1"/>`;
+    ticks += `<text x="${x}" y="${labelY}" text-anchor="middle" font-family="Space Mono" font-size="9" fill="#4d5562">${t}</text>`;
+  });
+
+  // axis line
+  const axisY = barY + barH;
+  const axisLine = `<line x1="${scaleX(0)}" y1="${axisY}" x2="${scaleX(totalT)}" y2="${axisY}" stroke="var(--border)" stroke-width="1"/>`;
+
+  // legend
+  const procMap = {};
+  ps.forEach(p => { if(!procMap[p.id]) procMap[p.id]=p; });
+  let legend = '';
+  Object.values(procMap).forEach((p,i) => {
+    legend += `<rect x="${40+i*70}" y="8" width="10" height="10" fill="${p.color}" rx="2"/>`;
+    legend += `<text x="${54+i*70}" y="18" font-family="Space Mono" font-size="9" fill="#7d8590">${p.name}</text>`;
+  });
+
+  el.innerHTML = `<div class="gantt-wrap anim-in">
+    <div style="font-size:10px;color:var(--muted);margin-bottom:8px;letter-spacing:1px;text-transform:uppercase">Gantt Chart — ${currentAlgo} &nbsp;<span style="color:var(--accent)">Total: ${totalT} ms</span></div>
+    <svg id="gantt-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:600px">
+      ${legend}${bars}${axisLine}${ticks}
+    </svg>
+  </div>`;
+}
+
+// ============================================================
+// METRICS RENDERING
+// ============================================================
+function renderMetrics(ps, energy, algo) {
+  const el = document.getElementById('metrics-area');
+  const colorMap = {'avgWT':'var(--accent2)','avgTAT':'var(--accent)','cpuUtil':'var(--accent3)','energy':'var(--warn)'};
+  el.innerHTML = `<div class="anim-in">
+    <div class="energy-rating"><span class="lightning">⚡</span> Algorithm: ${algo} &nbsp;|&nbsp; Energy Score: ${energy.energy} units</div>
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-value" style="color:var(--accent)">${energy.avgWT}</div>
+        <div class="metric-label">Avg Waiting Time (ms)</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" style="color:var(--accent2)">${energy.avgTAT}</div>
+        <div class="metric-label">Avg Turnaround (ms)</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" style="color:var(--accent3)">${energy.cpuUtil}%</div>
+        <div class="metric-label">CPU Utilization</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" style="color:var(--warn)">${energy.energy}</div>
+        <div class="metric-label">Energy (units)</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" style="color:var(--purple)">${energy.cs}</div>
+        <div class="metric-label">Context Switches</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" style="color:var(--red)">${energy.preemptions}</div>
+        <div class="metric-label">Preemptions</div>
+      </div>
+    </div>
+    <div style="font-family:var(--font-head);font-size:12px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Process Detail</div>
+    <div style="overflow-x:auto">
+    <table class="results-table">
+      <thead><tr>
+        <th>Process</th><th>Arrival</th><th>Burst</th><th>Priority</th>
+        <th>Completion</th><th>Turnaround</th><th>Waiting</th>
+      </tr></thead>
+      <tbody>
+        ${ps.map(p=>`<tr>
+          <td><span class="proc-dot" style="background:${p.color}"></span>${p.name}</td>
+          <td>${p.at}</td><td>${p.bt}</td><td>${p.pr}</td>
+          <td class="num">${p.ct||'—'}</td>
+          <td class="num">${p.tat||'—'}</td>
+          <td class="num">${p.wt||'—'}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+  </div>`;
+}
+
+// ============================================================
+// ENERGY RENDERING
+// ============================================================
+function renderEnergy(energy, algo) {
+  const el = document.getElementById('energy-area');
+  const total = parseFloat(energy.energy);
+  const active = energy.active * 1.0;
+  const idle = energy.idle * 0.2;
+  const csCost = energy.cs * 0.5;
+  const preCost = energy.preemptions * 0.3;
+  function pct(v) { return total > 0 ? ((v/total)*100).toFixed(1) : 0; }
+
+  const bars = [
+    {label:'Active CPU', value:active, pct:pct(active), color:'var(--accent)'},
+    {label:'Idle CPU', value:idle.toFixed(2), pct:pct(idle), color:'var(--accent2)'},
+    {label:'Context Switches', value:csCost.toFixed(2), pct:pct(csCost), color:'var(--accent3)'},
+    {label:'Preemptions', value:preCost.toFixed(2), pct:pct(preCost), color:'var(--red)'},
+  ];
+
+  // Energy efficiency rating
+  let rating = 'A+', rColor = 'var(--accent)';
+  if (total > 40) { rating='B'; rColor='var(--warn)'; }
+  if (total > 70) { rating='C'; rColor='var(--accent3)'; }
+  if (total > 100) { rating='D'; rColor='var(--red)'; }
+
+  el.innerHTML = `<div class="anim-in">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+      <div style="text-align:center;padding:16px;background:rgba(57,255,20,0.05);border:1px solid rgba(57,255,20,0.2);border-radius:8px;min-width:80px">
+        <div style="font-family:var(--font-head);font-size:36px;font-weight:800;color:${rColor}">${rating}</div>
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Energy Rating</div>
+      </div>
+      <div>
+        <div style="font-family:var(--font-head);font-size:28px;font-weight:800;color:var(--warn)">${total} <span style="font-size:14px;color:var(--muted)">units</span></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Total energy consumption for ${algo}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${energy.active}ms active &nbsp;·&nbsp; ${energy.idle}ms idle &nbsp;·&nbsp; ${energy.cs} switches</div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div style="margin-bottom:16px">
+      ${bars.map(b=>`<div class="energy-bar-wrap">
+        <div class="energy-bar-label">
+          <span style="color:${b.color}">${b.label}</span>
+          <span style="color:var(--text)">${b.value} units <span style="color:var(--muted)">(${b.pct}%)</span></span>
+        </div>
+        <div class="energy-bar-track">
+          <div class="energy-bar-fill" style="width:${b.pct}%;background:${b.color}"></div>
+        </div>
+      </div>`).join('')}
+    </div>
+    <div class="divider"></div>
+    <div style="font-size:10px;color:var(--muted);line-height:1.8">
+      <div>💡 <strong style="color:var(--text)">Tip:</strong> Fewer context switches and preemptions = less energy overhead.</div>
+      <div>💡 High CPU utilization reduces idle power waste.</div>
+      <div>💡 MLFQ and SJF tend to score best in energy efficiency.</div>
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// SINGLE CHARTS
+// ============================================================
+function renderSingleCharts(result, energy) {
+  destroyCharts();
+  const el = document.getElementById('charts-area');
+  el.innerHTML = `<div class="anim-in">
+    <div style="font-family:var(--font-head);font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Performance Charts — ${currentAlgo}</div>
+    <div class="chart-container"><canvas id="chart-wt-tat"></canvas></div>
+    <div class="chart-container"><canvas id="chart-energy-breakdown"></canvas></div>
+  </div>`;
+
+  const ps = result.ps;
+  const labels = ps.map(p=>p.name);
+  const wtData = ps.map(p=>p.wt||0);
+  const tatData = ps.map(p=>p.tat||0);
+
+  const chartDefaults = {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:'#7d8590',font:{family:'Space Mono',size:10}}}},
+    scales:{
+      x:{ticks:{color:'#7d8590',font:{family:'Space Mono',size:10}},grid:{color:'rgba(255,255,255,0.04)'}},
+      y:{ticks:{color:'#7d8590',font:{family:'Space Mono',size:10}},grid:{color:'rgba(255,255,255,0.04)'}}
+    }
+  };
+
+  charts['wt-tat'] = new Chart(document.getElementById('chart-wt-tat'), {
+    type:'bar',
+    data:{
+      labels,
+      datasets:[
+        {label:'Waiting Time',data:wtData,backgroundColor:'rgba(0,212,255,0.6)',borderColor:'rgba(0,212,255,1)',borderWidth:1},
+        {label:'Turnaround Time',data:tatData,backgroundColor:'rgba(57,255,20,0.4)',borderColor:'rgba(57,255,20,1)',borderWidth:1}
+      ]
+    },
+    options:{...chartDefaults,plugins:{...chartDefaults.plugins,title:{display:true,text:'WT vs TAT per Process',color:'#e6edf3',font:{family:'Syne',size:12,weight:'700'}}}}
+  });
+
+  const eBreakdown = [energy.active*1.0, energy.idle*0.2, energy.cs*0.5, energy.preemptions*0.3];
+  charts['energy-breakdown'] = new Chart(document.getElementById('chart-energy-breakdown'), {
+    type:'doughnut',
+    data:{
+      labels:['Active CPU','Idle CPU','Context Switches','Preemptions'],
+      datasets:[{data:eBreakdown,backgroundColor:['rgba(57,255,20,0.7)','rgba(0,212,255,0.7)','rgba(255,107,53,0.7)','rgba(255,71,87,0.7)'],borderColor:'#0d1117',borderWidth:2}]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'right',labels:{color:'#7d8590',font:{family:'Space Mono',size:10}}},
+        title:{display:true,text:'Energy Breakdown',color:'#e6edf3',font:{family:'Syne',size:12,weight:'700'}}
+      }
+    }
+  });
+}
+
+// ============================================================
+// COMPARE ALL
+// ============================================================
+function runAllAndCompare() {
+  if (!processes.length) { alert('Add at least one process!'); return; }
+  const quantum = parseInt(document.getElementById('quantum').value) || 2;
+  const algos = ['FCFS','SJF','SRTF','RR','PRIORITY_NP','PRIORITY_P','MLQ','MLFQ'];
+  const algoNames = {FCFS:'FCFS',SJF:'SJF',SRTF:'SRTF',RR:'Round Robin',PRIORITY_NP:'Priority NP',PRIORITY_P:'Priority P',MLQ:'MLQ',MLFQ:'MLFQ'};
+  const results = {};
+  algos.forEach(a => {
+    const r = runAlgo(a, processes, quantum);
+    results[a] = {result:r, energy:computeEnergy(r)};
+  });
+  compareResults = results;
+  renderCompare(results, algoNames);
+  renderCompareCharts(results, algoNames);
+  switchTabByName('compare');
+}
+
+function switchTabByName(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names=['gantt','metrics','energy','compare','charts'];
+    t.classList.toggle('active', names[i]===name);
+  });
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+function renderCompare(results, algoNames) {
+  const el = document.getElementById('compare-area');
+  const algos = Object.keys(results);
+  const metrics = algos.map(a=>({
+    algo:a, name:algoNames[a],
+    avgWT:parseFloat(results[a].energy.avgWT),
+    avgTAT:parseFloat(results[a].energy.avgTAT),
+    cpuUtil:parseFloat(results[a].energy.cpuUtil),
+    energy:parseFloat(results[a].energy.energy),
+    cs:results[a].energy.cs,
+    preemptions:results[a].energy.preemptions
+  }));
+
+  const best = (arr,key,low=true) => {
+    const vals = arr.map(m=>m[key]);
+    return low ? Math.min(...vals) : Math.max(...vals);
+  };
+  const worst = (arr,key,low=true) => {
+    const vals = arr.map(m=>m[key]);
+    return low ? Math.max(...vals) : Math.min(...vals);
+  };
+
+  const bestWT=best(metrics,'avgWT'), worstWT=worst(metrics,'avgWT');
+  const bestTAT=best(metrics,'avgTAT'), worstTAT=worst(metrics,'avgTAT');
+  const bestUtil=best(metrics,'cpuUtil',false), worstUtil=worst(metrics,'cpuUtil',false);
+  const bestEnergy=best(metrics,'energy'), worstEnergy=worst(metrics,'energy');
+  const bestCS=best(metrics,'cs'), worstCS=worst(metrics,'cs');
+
+  function cell(val, bst, wst, fmtFn=v=>v) {
+    let cls='';
+    if (val===bst) cls='cmp-best';
+    else if (val===wst) cls='cmp-worst';
+    return `<td class="${cls}">${fmtFn(val)}</td>`;
+  }
+
+  el.innerHTML = `<div class="anim-in">
+    <div style="font-family:var(--font-head);font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Algorithm Comparison Dashboard</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:12px">
+      <span class="tag tag-green">Best</span> &nbsp; <span class="tag tag-red">Worst</span> &nbsp; values highlighted per metric
+    </div>
+    <div style="overflow-x:auto;margin-bottom:16px">
+    <table class="cmp-table">
+      <thead><tr>
+        <th>Algorithm</th><th>Avg WT</th><th>Avg TAT</th><th>CPU %</th><th>Energy</th><th>CS</th><th>Preempt</th>
+      </tr></thead>
+      <tbody>
+        ${metrics.map(m=>`<tr>
+          <td>${m.name}</td>
+          ${cell(m.avgWT,bestWT,worstWT,v=>v.toFixed(2))}
+          ${cell(m.avgTAT,bestTAT,worstTAT,v=>v.toFixed(2))}
+          ${cell(m.cpuUtil,bestUtil,worstUtil,v=>v+'%')}
+          ${cell(m.energy,bestEnergy,worstEnergy,v=>v.toFixed(2))}
+          ${cell(m.cs,bestCS,worstCS)}
+          <td>${m.preemptions}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+
+    <div style="font-size:10px;color:var(--muted);line-height:2;border-left:2px solid var(--accent);padding-left:10px">
+      <div>🏆 Best Avg WT: <span style="color:var(--accent)">${algoNames[metrics.find(m=>m.avgWT===bestWT).algo]}</span></div>
+      <div>🏆 Best Avg TAT: <span style="color:var(--accent)">${algoNames[metrics.find(m=>m.avgTAT===bestTAT).algo]}</span></div>
+      <div>⚡ Most Energy Efficient: <span style="color:var(--warn)">${algoNames[metrics.find(m=>m.energy===bestEnergy).algo]}</span></div>
+      <div>🖥 Best CPU Utilization: <span style="color:var(--accent2)">${algoNames[metrics.find(m=>m.cpuUtil===bestUtil).algo]}</span></div>
+    </div>
+  </div>`;
+}
+
+function renderCompareCharts(results, algoNames) {
+  destroyCharts();
+  const el = document.getElementById('charts-area');
+  el.innerHTML = `<div class="anim-in">
+    <div style="font-family:var(--font-head);font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Visual Comparison — All Algorithms</div>
+    <div class="chart-container"><canvas id="chart-cmp-energy"></canvas></div>
+    <div class="chart-container"><canvas id="chart-cmp-perf"></canvas></div>
+  </div>`;
+
+  const algos = Object.keys(results);
+  const labels = algos.map(a=>algoNames[a]);
+  const energyVals = algos.map(a=>parseFloat(results[a].energy.energy));
+  const wtVals = algos.map(a=>parseFloat(results[a].energy.avgWT));
+  const tatVals = algos.map(a=>parseFloat(results[a].energy.avgTAT));
+  const baseOpts = {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:'#7d8590',font:{family:'Space Mono',size:10}}}},
+    scales:{
+      x:{ticks:{color:'#7d8590',font:{family:'Space Mono',size:9}},grid:{color:'rgba(255,255,255,0.04)'}},
+      y:{ticks:{color:'#7d8590',font:{family:'Space Mono',size:9}},grid:{color:'rgba(255,255,255,0.04)'}}
+    }
+  };
+
+  charts['cmp-energy'] = new Chart(document.getElementById('chart-cmp-energy'),{
+    type:'bar',
+    data:{labels,datasets:[{label:'Energy Consumption (units)',data:energyVals,
+      backgroundColor:algos.map((_,i)=>`hsl(${i*45},70%,50%)`),borderWidth:0,borderRadius:3}]},
+    options:{...baseOpts,plugins:{...baseOpts.plugins,title:{display:true,text:'⚡ Energy Consumption by Algorithm',color:'#e6edf3',font:{family:'Syne',size:12,weight:'700'}}}}
+  });
+
+  charts['cmp-perf'] = new Chart(document.getElementById('chart-cmp-perf'),{
+    type:'bar',
+    data:{labels,datasets:[
+      {label:'Avg Waiting Time',data:wtVals,backgroundColor:'rgba(0,212,255,0.6)',borderColor:'rgba(0,212,255,1)',borderWidth:1},
+      {label:'Avg Turnaround Time',data:tatVals,backgroundColor:'rgba(57,255,20,0.4)',borderColor:'rgba(57,255,20,1)',borderWidth:1}
+    ]},
+    options:{...baseOpts,plugins:{...baseOpts.plugins,title:{display:true,text:'📊 Waiting Time vs Turnaround Time',color:'#e6edf3',font:{family:'Syne',size:12,weight:'700'}}}}
+  });
+
+}
+
+function destroyCharts() {
+  Object.values(charts).forEach(c => { try { c.destroy(); } catch(e){} });
+  charts = {};
+}
+
+// ============================================================
+// INIT
+// ============================================================
+loadSample();
+updateStatus();
+</script>
+</body>
+</html>
